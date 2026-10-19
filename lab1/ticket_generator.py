@@ -12,6 +12,7 @@ from openpyxl import Workbook, load_workbook
 
 JOURNAL_FILE = "journal.xlsx"
 HEADER = ["Last name", "First name", "Номер билета", "Дата и время"]
+COLUMN_WIDTHS = {"A": 20, "B": 20, "C": 15, "D": 22}
 TICKET_MIN, TICKET_MAX = 1, 20
 ESC = "\x1b"
 
@@ -47,6 +48,8 @@ def append_record(path, last_name, first_name, ticket, when=None):
         ws = wb.active
         ws.title = "Journal"
         ws.append(HEADER)
+        for column, width in COLUMN_WIDTHS.items():
+            ws.column_dimensions[column].width = width
     ws.append([last_name, first_name, ticket, when.strftime("%d.%m.%Y %H:%M:%S")])
     wb.save(path)
 
