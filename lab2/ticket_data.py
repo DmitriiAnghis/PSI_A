@@ -11,6 +11,7 @@ from openpyxl import Workbook, load_workbook
 log = logging.getLogger("tickets")
 
 RESULTS_HEADER = ["Группа", "Фамилия", "Имя", "Номер билета", "Дата и время", "Повтор (да/нет)"]
+RESULTS_WIDTHS = {"A": 12, "B": 18, "C": 16, "D": 15, "E": 22, "F": 17}
 QUESTIONS_PER_TICKET = 3
 
 _TICKET_RE = re.compile(r"^\s*Билет\s*№?\s*(\d+)\s*$", re.IGNORECASE)
@@ -142,6 +143,8 @@ def append_result(results_path, group, last, first, ticket, repeat, when=None):
         ws = wb.active
         ws.title = "Results"
         ws.append(RESULTS_HEADER)
+        for column, width in RESULTS_WIDTHS.items():
+            ws.column_dimensions[column].width = width
     ws.append([group, last, first, ticket, when.strftime("%d.%m.%Y %H:%M:%S"),
                "да" if repeat else "нет"])
     wb.save(results_path)

@@ -92,7 +92,7 @@ class TicketApp(tk.Tk):
                 retry = messagebox.askretrycancel(
                     "Файл занят",
                     f"Файл {os.path.basename(RESULTS_FILE)} открыт в другой программе "
-                    "(например, в Excel).\nЗакройте его и нажмите «Повторить».",
+                    "(например, в Excel).\nЗакройте его и повторите попытку.",
                     parent=self)
                 if not retry:
                     return False
