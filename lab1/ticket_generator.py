@@ -5,8 +5,11 @@
 """
 import os
 import random
+import re
 import sys
+import unicodedata
 from datetime import datetime
+from typing import Callable, Protocol
 
 from openpyxl import Workbook, load_workbook
 
@@ -21,7 +24,53 @@ class ExitRequested(Exception):
     """Пользователь нажал ESC."""
 
 
-# ---------- логика (покрыта тестами) ----------
+class NameValidator(Protocol):
+    def validate(self, raw: str) -> str:
+        """Возвращает нормализованное имя или сообщает об ошибке."""
+
+
+class TicketNumberGenerator(Protocol):
+    def generate(self) -> int:
+        """Возвращает номер билета."""
+
+
+class RecordRepository(Protocol):
+    def append(self, last_name: str, first_name: str, ticket: int) -> None:
+        """Сохраняет запись в журнал."""
+
+
+class UserInterface(Protocol):
+    def ask_name(self, prompt: str) -> str:
+        """Запрашивает и возвращает проверенное имя."""
+
+    def show_message(self, message: str) -> None:
+        """Выводит сообщение пользователю."""
+
+    def show_ticket(self, ticket: int) -> None:
+        """Показывает выданный билет."""
+
+    def wait_for_retry(self) -> None:
+        """Ждёт подтверждения перед повторной попыткой сохранения."""
+
+
+class UnicodeNameValidator:
+    """Проверяет имя или фамилию на буквы, заглавную первую букву и разделители."""
+
+    _separators = re.compile(r"['’ -]")
+
+    def validate(self, raw: str) -> str:
+        value = unicodedata.normalize("NFC", raw.strip())
+        if not value:
+            raise ValueError("Поле не может быть пустым.")
+        if not value[0].isupper():
+            raise ValueError("Имя и фамилия должны начинаться с заглавной буквы.")
+        parts = self._separators.split(value)
+        if not all(part and part.isalpha() for part in parts):
+            raise ValueError(
+                "Допустимы только буквы, пробелы, дефис и апостроф."
+            )
+        return value
+
 
 def clean_name(raw):
     """Обрезает пробелы по краям. Возвращает None, если строка пустая."""
@@ -31,6 +80,14 @@ def clean_name(raw):
 
 def generate_ticket(rng=random):
     return rng.randint(TICKET_MIN, TICKET_MAX)
+
+
+class RandomTicketGenerator:
+    def __init__(self, rng=random):
+        self._rng = rng
+
+    def generate(self) -> int:
+        return generate_ticket(self._rng)
 
 
 def append_record(path, last_name, first_name, ticket, when=None):
@@ -54,8 +111,15 @@ def append_record(path, last_name, first_name, ticket, when=None):
     wb.save(path)
 
 
-# ---------- консольный ввод ----------
+class ExcelJournalRepository:
+    def __init__(self, path=JOURNAL_FILE):
+        self._path = path
 
+    def append(self, last_name: str, first_name: str, ticket: int) -> None:
+        append_record(self._path, last_name, first_name, ticket)
+
+
+# ---------- консольный ввод ----------
 def _read_key():
     """Считывает одну клавишу без ожидания Enter."""
     if os.name == "nt":
@@ -81,50 +145,131 @@ def _read_key():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def ask(prompt):
-    """Запрашивает непустую строку. ESC в начале ввода -> ExitRequested."""
+def ask(prompt, validator=None):
+    """Запрашивает допустимое имя. ESC в начале ввода -> ExitRequested."""
+    if validator is None:
+        validator = UnicodeNameValidator()
     while True:
         print(prompt, end="", flush=True)
-        first = _read_key()
-        if first == ESC:
-            print()
-            raise ExitRequested
-        if first in ("\r", "\n", "", "\x08", "\x7f"):  # Enter/Backspace на пустом поле
-            print()
-            print("Поле не может быть пустым, повторите ввод.")
-            continue
-        if first == "\x03":  # Ctrl+C
-            raise KeyboardInterrupt
-        print(first, end="", flush=True)
-        value = clean_name(first + input())
-        if value:
-            return value
-        print("Поле не может быть пустым, повторите ввод.")
+        characters = []
+        while True:
+            key = _read_key()
+            if key == ESC and not characters:
+                print()
+                raise ExitRequested
+            if key == "\x03":  # Ctrl+C
+                raise KeyboardInterrupt
+            if key in ("\r", "\n"):
+                print()
+                break
+            if key in ("\x08", "\x7f"):
+                if characters:
+                    characters.pop()
+                    print("\b \b", end="", flush=True)
+                continue
+            if not key or key in ("\x00", "\xe0"):
+                continue
+            characters.append(key)
+            print(key, end="", flush=True)
+
+        value = clean_name("".join(characters))
+        try:
+            return validator.validate(value or "")
+        except ValueError as error:
+            print(f"{error} Повторите ввод.")
+
+
+class ConsoleUserInterface:
+    def __init__(self, name_validator: NameValidator):
+        self._name_validator = name_validator
+
+    def ask_name(self, prompt: str) -> str:
+        return ask(prompt, self._name_validator)
+
+    def show_message(self, message: str) -> None:
+        print(message)
+
+    def show_ticket(self, ticket: int) -> None:
+        print(f"Билет № {ticket}")
+
+    def wait_for_retry(self) -> None:
+        input("Закройте файл и нажмите Enter, чтобы повторить сохранение...")
 
 
 def save_with_retry(last_name, first_name, ticket, path=JOURNAL_FILE):
+    def retry_message():
+        print(f"Файл {path} открыт в другой программе (например, в Excel) "
+              "и недоступен для записи.")
+        input("Закройте файл и нажмите Enter, чтобы повторить сохранение...")
+
+    _retry_on_permission_error(
+        lambda: append_record(path, last_name, first_name, ticket),
+        retry_message,
+    )
+
+
+def _retry_on_permission_error(
+    action: Callable[[], None], on_error: Callable[[], None]
+) -> None:
     while True:
         try:
-            append_record(path, last_name, first_name, ticket)
+            action()
             return
         except PermissionError:
-            print(f"Файл {path} открыт в другой программе (например, в Excel) "
-                  "и недоступен для записи.")
-            input("Закройте файл и нажмите Enter, чтобы повторить сохранение...")
+            on_error()
+
+
+class TicketApplication:
+    def __init__(
+        self,
+        ticket_generator: TicketNumberGenerator,
+        repository: RecordRepository,
+        user_interface: UserInterface,
+    ):
+        self._ticket_generator = ticket_generator
+        self._repository = repository
+        self._user_interface = user_interface
+
+    def run(self) -> None:
+        self._user_interface.show_message("Для выхода нажмите ESC")
+        try:
+            self._run_until_exit()
+        except (ExitRequested, KeyboardInterrupt, EOFError):
+            self._user_interface.show_message("Работа завершена.")
+
+    def _run_until_exit(self) -> None:
+        while True:
+            last_name = self._user_interface.ask_name("Last name: ")
+            first_name = self._user_interface.ask_name("First name: ")
+            ticket = self._ticket_generator.generate()
+            self._user_interface.show_ticket(ticket)
+            self._save_with_retry(last_name, first_name, ticket)
+            self._user_interface.show_message("")
+
+    def _save_with_retry(
+        self, last_name: str, first_name: str, ticket: int
+    ) -> None:
+        def show_retry_message() -> None:
+            self._user_interface.show_message(
+                "Файл журнала открыт в другой программе (например, в Excel) "
+                "и недоступен для записи."
+            )
+            self._user_interface.wait_for_retry()
+
+        _retry_on_permission_error(
+            lambda: self._repository.append(last_name, first_name, ticket),
+            show_retry_message,
+        )
 
 
 def main():
-    print("Для выхода нажмите ESC")
-    try:
-        while True:
-            last_name = ask("Last name: ")
-            first_name = ask("First name: ")
-            ticket = generate_ticket()
-            print(f"Билет № {ticket}")
-            save_with_retry(last_name, first_name, ticket)
-            print()
-    except (ExitRequested, KeyboardInterrupt, EOFError):
-        print("Работа завершена.")
+    name_validator = UnicodeNameValidator()
+    application = TicketApplication(
+        ticket_generator=RandomTicketGenerator(),
+        repository=ExcelJournalRepository(),
+        user_interface=ConsoleUserInterface(name_validator),
+    )
+    application.run()
 
 
 if __name__ == "__main__":
