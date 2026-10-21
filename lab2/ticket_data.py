@@ -113,25 +113,37 @@ def _key(group, last, first):
     return (group.strip().casefold(), last.strip().casefold(), first.strip().casefold())
 
 
+REASSIGNED = "переназначен"
+
+
 def find_first_ticket(results_path, group, last, first):
-    """Номер билета из самой первой записи студента в журнале или None."""
+    """Текущий билет студента по журналу или None.
+
+    Это номер из первой записи студента; если билет потом переназначали,
+    то номер из последнего переназначения. Строки «Повтор = да» не влияют.
+    """
     if not os.path.exists(results_path):
         return None
     wb = load_workbook(results_path, read_only=True)
     try:
         target = _key(group, last, first)
-        for row in wb.active.iter_rows(min_row=2, max_col=4, values_only=True):
-            g, l, f, number = (tuple(row) + (None,) * 4)[:4]
-            if number is not None and _key(_cell_text(g), _cell_text(l), _cell_text(f)) == target:
-                return int(number)
+        current = None
+        for row in wb.active.iter_rows(min_row=2, max_col=6, values_only=True):
+            g, l, f, number, _, status = (tuple(row) + (None,) * 6)[:6]
+            if number is None or _key(_cell_text(g), _cell_text(l), _cell_text(f)) != target:
+                continue
+            status = _cell_text(status).casefold()
+            if current is None or status == REASSIGNED:
+                current = int(number)
+        return current
     finally:
         wb.close()
-    return None
 
 
 def append_result(results_path, group, last, first, ticket, repeat, when=None):
     """Дописывает строку в конец results.xlsx и сразу сохраняет.
 
+    repeat: True / False (да / нет) или строка статуса, например REASSIGNED.
     PermissionError пробрасывается наверх (файл открыт в Excel).
     """
     when = when or datetime.now()
@@ -145,8 +157,8 @@ def append_result(results_path, group, last, first, ticket, repeat, when=None):
         ws.append(RESULTS_HEADER)
         for column, width in RESULTS_WIDTHS.items():
             ws.column_dimensions[column].width = width
-    ws.append([group, last, first, ticket, when.strftime("%d.%m.%Y %H:%M:%S"),
-               "да" if repeat else "нет"])
+    status = repeat if isinstance(repeat, str) else ("да" if repeat else "нет")
+    ws.append([group, last, first, ticket, when.strftime("%d.%m.%Y %H:%M:%S"), status])
     wb.save(results_path)
 
 
@@ -303,6 +315,7 @@ def results_stats(rows):
     """Сводка по журналу: выдано, повторов, студентов, самый частый билет."""
     issued = len(rows)
     repeats = sum(1 for r in rows if r[5].casefold() == "да")
+    reassigned = sum(1 for r in rows if r[5].casefold() == REASSIGNED)
     students = len({_key(r[0], r[1], r[2]) for r in rows})
     counts = {}
     for r in rows:
@@ -310,7 +323,7 @@ def results_stats(rows):
             counts[r[3]] = counts.get(r[3], 0) + 1
     top = max(counts.items(), key=lambda kv: (kv[1], -int(kv[0]) if kv[0].isdigit() else 0),
               default=None)
-    return {"issued": issued, "repeats": repeats, "students": students,
+    return {"issued": issued, "repeats": repeats, "reassigned": reassigned, "students": students,
             "top_ticket": top[0] if top else None, "top_count": top[1] if top else 0}
 
 
@@ -444,3 +457,225 @@ def export_results_csv(rows, path):
         writer.writerow(RESULTS_HEADER)
         writer.writerows(rows)
     return path
+
+
+# --- переназначение и массовая выдача ---
+
+def reassign_ticket(results_path, tickets, group, last, first, number=None, rng=random):
+    """Выдаёт студенту другой билет и пишет строку «переназначен».
+
+    number — конкретный билет (ручное назначение), иначе случайный, отличный от текущего.
+    Возвращает новый номер.
+    """
+    if not tickets:
+        raise TicketError("Нет ни одного билета.")
+    current = find_first_ticket(results_path, group, last, first)
+    if number is None:
+        choices = [n for n in sorted(tickets) if n != current] or sorted(tickets)
+        number = rng.choice(choices)
+    else:
+        try:
+            number = int(str(number).strip())
+        except ValueError:
+            raise TicketError("Номер билета должен быть целым числом.") from None
+        if number not in tickets:
+            raise TicketError(f"Билета № {number} нет в tickets.docx.")
+        if number == current:
+            raise TicketError(f"У студента уже билет № {number}.")
+    append_result(results_path, group, last, first, number, REASSIGNED)
+    return number
+
+
+def assign_group(results_path, tickets, group, students, rng=random):
+    """Выдаёт билеты всем студентам группы, у кого их ещё нет.
+
+    Возвращает (выдано: [(фамилия, имя, номер)], уже_было: число).
+    Все строки пишутся одним сохранением файла.
+    """
+    if not tickets:
+        raise TicketError("Нет ни одного билета.")
+    issued, skipped, new_rows = [], 0, []
+    for last, first in students:
+        if find_first_ticket(results_path, group, last, first) is not None:
+            skipped += 1
+            continue
+        number = rng.choice(sorted(tickets))
+        issued.append((last, first, number))
+    if issued:
+        when = datetime.now()
+        if os.path.exists(results_path):
+            wb = load_workbook(results_path)
+            ws = wb.active
+        else:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Results"
+            ws.append(RESULTS_HEADER)
+            for column, width in RESULTS_WIDTHS.items():
+                ws.column_dimensions[column].width = width
+        for last, first, number in issued:
+            ws.append([group, last, first, number, when.strftime("%d.%m.%Y %H:%M:%S"), "нет"])
+        wb.save(results_path)
+    return issued, skipped
+
+
+# --- правка студентов и групп ---
+
+def _rewrite_results(results_path, change):
+    """change(row_values) -> новые значения или None. Сохраняет, если что-то изменилось."""
+    if not results_path or not os.path.exists(results_path):
+        return 0
+    wb = load_workbook(results_path)
+    ws = wb.active
+    changed = 0
+    for row in ws.iter_rows(min_row=2, max_col=3):
+        values = [_cell_text(c.value) for c in row]
+        new = change(values)
+        if new is not None and new != values:
+            for cell, value in zip(row, new):
+                cell.value = value
+            changed += 1
+    if changed:
+        wb.save(results_path)
+    else:
+        wb.close()
+    return changed
+
+
+def move_results(results_path, old, new):
+    """Записи журнала студента old=(группа, фамилия, имя) переписываются на new."""
+    key = _key(*old)
+    return _rewrite_results(results_path, lambda v: list(new) if _key(*v) == key else None)
+
+
+def rename_group_results(results_path, old, new):
+    """В журнале название группы old меняется на new."""
+    return _rewrite_results(results_path, lambda v: [new] + v[1:] if v[0] == old else None)
+
+
+def _find_row(ws, last, first):
+    target = (last.strip().casefold(), first.strip().casefold())
+    for index, row in enumerate(ws.iter_rows(min_row=2, max_col=2, values_only=True), start=2):
+        l, f = (_cell_text(v) for v in (tuple(row) + (None, None))[:2])
+        if (l.casefold(), f.casefold()) == target:
+            return index
+    return None
+
+
+def update_student(path, group, old, new_group, new_last, new_first, results_path=None):
+    """Исправляет фамилию/имя и (или) переводит студента в другую группу.
+
+    old — (фамилия, имя). Записи журнала переносятся вместе со студентом.
+    Возвращает (группа, фамилия, имя) после изменений.
+    """
+    new_last = validate_name(new_last, "Фамилия")
+    new_first = validate_name(new_first, "Имя")
+    wb = load_workbook(path)
+    for name in (group, new_group):
+        if name not in wb.sheetnames:
+            wb.close()
+            raise SourceError(f"Группы {name} нет.")
+    src, dst = wb[group], wb[new_group]
+    index = _find_row(src, *old)
+    if index is None:
+        wb.close()
+        raise SourceError(f"{old[0]} {old[1]} нет в группе {group}.")
+    same = new_group == group and (new_last.casefold(), new_first.casefold()) == (
+        old[0].casefold(), old[1].casefold())
+    other = _find_row(dst, new_last, new_first)
+    if other is not None and not (new_group == group and other == index):
+        wb.close()
+        raise DuplicateStudentError(f"{new_last} {new_first} уже есть в группе {new_group}.")
+    if new_group == group:
+        src.cell(index, 1).value, src.cell(index, 2).value = new_last, new_first
+    else:
+        src.delete_rows(index)
+        dst.append([new_last, new_first])
+    if not same:
+        wb.save(path)
+        move_results(results_path, (group, *old), (new_group, new_last, new_first))
+    else:
+        wb.close()
+    return new_group, new_last, new_first
+
+
+def rename_group(path, old, new, results_path=None):
+    """Переименовывает лист группы; в журнале название тоже меняется."""
+    new = validate_group(new)
+    wb = load_workbook(path)
+    if old not in wb.sheetnames:
+        wb.close()
+        raise SourceError(f"Группы {old} нет.")
+    if new != old and new.casefold() in (t.casefold() for t in wb.sheetnames if t != old):
+        wb.close()
+        raise DuplicateGroupError(f"Группа {new} уже есть.")
+    wb[old].title = new
+    wb.save(path)
+    rename_group_results(results_path, old, new)
+    return new
+
+
+def add_students_bulk(path, group, text):
+    """Добавляет студентов из текста: одна строка — «Фамилия Имя».
+
+    Возвращает (добавлено: [(фамилия, имя)], ошибки: ["строка N: ..."]).
+    Корректные строки сохраняются, даже если в других есть ошибки.
+    """
+    wb = load_workbook(path)
+    if group not in wb.sheetnames:
+        wb.close()
+        raise SourceError(f"Группы {group} нет.")
+    ws = wb[group]
+    added, errors = [], []
+    for n, line in enumerate(str(text).splitlines(), 1):
+        parts = line.split()
+        if not parts:
+            continue
+        if len(parts) < 2:
+            errors.append(f"строка {n}: нужны фамилия и имя через пробел")
+            continue
+        last, first = parts[0], " ".join(parts[1:])
+        try:
+            last = validate_name(last, "Фамилия")
+            first = validate_name(first, "Имя")
+        except InvalidNameError as exc:
+            errors.append(f"строка {n}: {exc}")
+            continue
+        if _find_row(ws, last, first) is not None:
+            errors.append(f"строка {n}: {last} {first} уже есть в группе")
+            continue
+        ws.append([last, first])
+        added.append((last, first))
+    if added:
+        wb.save(path)
+    else:
+        wb.close()
+    return added, errors
+
+
+# --- журнал: удаление записи ---
+
+def remove_result(results_path, index, expected):
+    """Удаляет запись журнала по номеру (как в load_results, с нуля).
+
+    expected — значения строки, которые видел пользователь: если файл успел
+    измениться и строка другая, ничего не удаляется. Возвращает True/False.
+    """
+    if not os.path.exists(results_path):
+        return False
+    wb = load_workbook(results_path)
+    ws = wb.active
+    # индексы load_results пропускают пустые строки — восстанавливаем номера строк листа
+    rows = [r for r in range(2, ws.max_row + 1)
+            if any(ws.cell(r, c).value is not None for c in range(1, 7))]
+    if not 0 <= index < len(rows):
+        wb.close()
+        return False
+    row = rows[index]
+    values = tuple(_cell_text(ws.cell(row, c).value) for c in range(1, 7))
+    if values != tuple(expected):
+        wb.close()
+        return False
+    ws.delete_rows(row)
+    wb.save(results_path)
+    return True

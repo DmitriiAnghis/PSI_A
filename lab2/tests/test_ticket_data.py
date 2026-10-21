@@ -238,7 +238,7 @@ def test_results_and_stats(tmp_path):
     rows_ = td.load_results(path)
     assert len(rows_) == 4 and rows_[0][:4] == ("TI-235", "Anghis", "Dmitrii", "7")
     stats = td.results_stats(rows_)
-    assert stats == {"issued": 4, "repeats": 1, "students": 3, "top_ticket": "7", "top_count": 2}
+    assert stats == {"issued": 4, "repeats": 1, "reassigned": 0, "students": 3, "top_ticket": "7", "top_count": 2}
 
 
 # --- билеты в tickets.docx, удаление группы, экспорт ---
@@ -306,3 +306,133 @@ def test_export_results_csv(tmp_path):
                                 tmp_path / "journal.csv")
     text = Path(out).read_text(encoding="utf-8-sig").splitlines()
     assert text[0].startswith("Группа;Фамилия") and text[1] == "TI-235;Anghis;Dmitrii;7;21.10.2026 10:00:00;нет"
+
+
+# --- переназначение и массовая выдача ---
+
+TICKETS = {1: ["a", "b", "c"], 2: ["d", "e", "f"], 3: ["g", "h", "i"]}
+
+
+def test_reassign_random_differs_and_becomes_current(tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "TI-235", "Anghis", "Dmitrii", 1, False)
+    for seed in range(10):
+        current = td.find_first_ticket(results, "TI-235", "Anghis", "Dmitrii")
+        new = td.reassign_ticket(results, TICKETS, "TI-235", "Anghis", "Dmitrii",
+                                 rng=random.Random(seed))
+        assert new != current
+        assert td.find_first_ticket(results, "TI-235", "Anghis", "Dmitrii") == new
+    assert rows(results)[-1][5] == td.REASSIGNED
+
+
+def test_repeat_after_reassign_gives_new_ticket(tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "TI-235", "Anghis", "Dmitrii", 1, False)
+    td.reassign_ticket(results, TICKETS, "TI-235", "Anghis", "Dmitrii", number=3)
+    td.append_result(results, "TI-235", "Anghis", "Dmitrii", 3, True)
+    assert td.assign_ticket(results, TICKETS, "TI-235", "Anghis", "Dmitrii") == (3, True)
+
+
+def test_reassign_manual_number_validation(tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "TI-235", "Anghis", "Dmitrii", 2, False)
+    for bad in ("x", "7", 2):
+        with pytest.raises(td.TicketError):
+            td.reassign_ticket(results, TICKETS, "TI-235", "Anghis", "Dmitrii", number=bad)
+    assert td.reassign_ticket(results, TICKETS, "TI-235", "Anghis", "Dmitrii", number=" 3 ") == 3
+    assert len(rows(results)) == 3
+
+
+def test_reassign_without_tickets(tmp_path):
+    with pytest.raises(td.TicketError):
+        td.reassign_ticket(tmp_path / "r.xlsx", {}, "TI-235", "Anghis", "Dmitrii")
+
+
+def test_assign_group_skips_students_with_ticket(tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "TI-235", "Anghis", "Dmitrii", 1, False)
+    issued, skipped = td.assign_group(results, TICKETS, "TI-235",
+                                      [("Anghis", "Dmitrii"), ("Popescu", "Ion"), ("Rusu", "Ana")],
+                                      rng=random.Random(1))
+    assert skipped == 1
+    assert [(l, f) for l, f, _ in issued] == [("Popescu", "Ion"), ("Rusu", "Ana")]
+    assert all(n in TICKETS for _, _, n in issued)
+    assert len(rows(results)) == 4
+    assert td.assign_group(results, TICKETS, "TI-235", [("Rusu", "Ana")]) == ([], 1)
+
+
+def test_stats_count_reassigned(tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "G", "A", "B", 1, False)
+    td.append_result(results, "G", "A", "B", 2, td.REASSIGNED)
+    td.append_result(results, "G", "A", "B", 2, True)
+    stats = td.results_stats(td.load_results(results))
+    assert (stats["issued"], stats["repeats"], stats["reassigned"]) == (3, 1, 1)
+
+
+# --- правка студентов и групп ---
+
+def test_update_student_rename_updates_journal(students, tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "TI-235", "Popescu", "Ion", 2, False)
+    td.append_result(results, "TI-235", "Anghis", "Dmitrii", 1, False)
+    assert td.update_student(students, "TI-235", ("Popescu", "Ion"), "TI-235", " Popescu ", "Ionel",
+                             results) == ("TI-235", "Popescu", "Ionel")
+    assert td.load_groups(students)["TI-235"] == [("Anghis", "Dmitrii"), ("Popescu", "Ionel")]
+    assert rows(results)[1][:3] == ["TI-235", "Popescu", "Ionel"]
+    assert rows(results)[2][:3] == ["TI-235", "Anghis", "Dmitrii"]
+
+
+def test_update_student_move_to_group_keeps_ticket(students, tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "TI-235", "Anghis", "Dmitrii", 3, False)
+    td.update_student(students, "TI-235", ("Anghis", "Dmitrii"), "TI-237", "Anghis", "Dmitrii",
+                      results)
+    groups = td.load_groups(students)
+    assert groups["TI-235"] == [("Popescu", "Ion")]
+    assert groups["TI-237"] == [("Anghis", "Dmitrii")]
+    assert td.find_first_ticket(results, "TI-237", "Anghis", "Dmitrii") == 3
+    assert td.find_first_ticket(results, "TI-235", "Anghis", "Dmitrii") is None
+
+
+def test_update_student_rejects_duplicate_and_bad_name(students):
+    with pytest.raises(td.DuplicateStudentError):
+        td.update_student(students, "TI-235", ("Popescu", "Ion"), "TI-235", "Anghis", "Dmitrii")
+    with pytest.raises(td.InvalidNameError):
+        td.update_student(students, "TI-235", ("Popescu", "Ion"), "TI-235", "Pop3scu", "Ion")
+    with pytest.raises(td.SourceError):
+        td.update_student(students, "TI-235", ("Nobody", "X"), "TI-235", "Nobody", "X")
+    # регистр своей же фамилии менять можно
+    td.update_student(students, "TI-235", ("Popescu", "Ion"), "TI-235", "Popescu", "Ion")
+    assert td.load_groups(students)["TI-235"][1] == ("Popescu", "Ion")
+
+
+def test_rename_group_updates_journal(students, tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "TI-235", "Anghis", "Dmitrii", 1, False)
+    assert td.rename_group(students, "TI-235", "TI-235A", results) == "TI-235A"
+    assert list(td.load_groups(students)) == ["TI-235A", "TI-237"]
+    assert rows(results)[1][0] == "TI-235A"
+    with pytest.raises(td.DuplicateGroupError):
+        td.rename_group(students, "TI-235A", "TI-237")
+    with pytest.raises(td.InvalidNameError):
+        td.rename_group(students, "TI-235A", "ti-238")
+
+
+def test_add_students_bulk_reports_bad_lines(students):
+    added, errors = td.add_students_bulk(students, "TI-237",
+                                         "Rusu Ana\n\nbadname\nCebotari 2Ion\nMoraru Maria\nRusu Ana\nlupu Ion\n")
+    assert added == [("Rusu", "Ana"), ("Moraru", "Maria")]
+    assert [e.split(":")[0] for e in errors] == ["строка 3", "строка 4", "строка 6", "строка 7"]
+    assert td.load_groups(students)["TI-237"] == [("Rusu", "Ana"), ("Moraru", "Maria")]
+
+
+def test_remove_result_checks_row_values(tmp_path):
+    results = tmp_path / "r.xlsx"
+    td.append_result(results, "G", "A", "B", 1, False)
+    td.append_result(results, "G", "C", "D", 2, False)
+    loaded = td.load_results(results)
+    assert td.remove_result(results, 1, loaded[0]) is False
+    assert td.remove_result(results, 5, loaded[0]) is False
+    assert td.remove_result(results, 0, loaded[0]) is True
+    assert td.load_results(results) == [loaded[1]]
