@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 import ticket_data as td
+from excel_closer import close_in_excel
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -32,6 +33,8 @@ COLORS = {
     "warn_bg": "#FFF4E5",
     "warn_text": "#9A5B00",
     "error": "#C92A2A",
+    "secondary_bg": "#EDF1FF",
+    "secondary_hover": "#DCE3FF",
 }
 
 
@@ -57,6 +60,13 @@ def setup_styles(root):
     style.map("Accent.TButton",
               background=[("disabled", c["accent_disabled"]), ("active", c["accent_hover"])],
               foreground=[("disabled", "#FFFFFF")])
+    style.configure("Secondary.TButton", font=(FONT, 10, "bold"), padding=(14, 8),
+                    background=c["secondary_bg"], foreground=c["accent"], borderwidth=0,
+                    focuscolor=c["secondary_bg"])
+    style.map("Secondary.TButton", background=[("active", c["secondary_hover"])])
+    style.configure("TEntry", padding=6, fieldbackground=c["card"], bordercolor=c["border"],
+                    lightcolor=c["border"], darkcolor=c["border"])
+    style.map("TEntry", bordercolor=[("focus", c["accent"])])
     root.option_add("*TCombobox*Listbox.font", (FONT, 10))
     root.option_add("*TCombobox*Listbox.selectBackground", c["accent"])
 
@@ -115,9 +125,13 @@ class TicketApp(tk.Tk):
                                        cursor="hand2")
         self.generate_btn.grid(row=4, column=0, sticky="ew")
 
+        self.add_btn = ttk.Button(frame, text="+ Добавить студента", style="Secondary.TButton",
+                                  command=self.open_add_student, cursor="hand2")
+        self.add_btn.grid(row=5, column=0, sticky="ew", pady=(8, 0))
+
         self.status_var = tk.StringVar()
         ttk.Label(frame, textvariable=self.status_var, style="Hint.TLabel").grid(
-            row=5, column=0, sticky="w", pady=(12, 0))
+            row=6, column=0, sticky="w", pady=(12, 0))
         self.update_status()
 
     # --- выбор ---
@@ -163,18 +177,41 @@ class TicketApp(tk.Tk):
         self.show_result(f"{last} {first}".strip(), group, number, repeat)
 
     def save_result(self, group, last, first, number, repeat):
+        return self.write_with_retry(
+            RESULTS_FILE,
+            lambda: td.append_result(RESULTS_FILE, group, last, first, number, repeat))
+
+    def write_with_retry(self, path, write, parent=None):
+        """Выполняет запись в xlsx. Если файл открыт в Excel, сначала пробует
+        закрыть его сама, иначе просит пользователя закрыть файл."""
+        auto_closed = False
         while True:
             try:
-                td.append_result(RESULTS_FILE, group, last, first, number, repeat)
+                write()
                 return True
             except PermissionError:
+                if not auto_closed and close_in_excel(path):
+                    auto_closed = True
+                    continue
                 retry = messagebox.askretrycancel(
                     "Файл занят",
-                    f"Файл {os.path.basename(RESULTS_FILE)} открыт в другой программе "
+                    f"Файл {os.path.basename(path)} открыт в другой программе "
                     "(например, в Excel).\nЗакройте его и повторите попытку.",
-                    parent=self)
+                    parent=parent or self)
                 if not retry:
                     return False
+
+    # --- добавление студента ---
+
+    def open_add_student(self):
+        AddStudentDialog(self)
+
+    def student_added(self, group, last, first):
+        self.groups.setdefault(group, []).append((last, first))
+        self.group_var.set(group)
+        self.on_group_selected()
+        self.student_box.current(len(self.groups[group]) - 1)
+        self.update_button()
 
     def show_result(self, student, group, number, repeat):
         c = COLORS
@@ -208,6 +245,72 @@ class TicketApp(tk.Tk):
         ttk.Label(body, text="Esc — закрыть", style="Hint.TLabel").pack(anchor="e", pady=(14, 0))
         win.bind("<Escape>", lambda _e: win.destroy())
         win.focus_force()
+
+
+class AddStudentDialog(tk.Toplevel):
+    """Окно «Добавить студента»: группа, фамилия, имя с проверкой ввода."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        c = COLORS
+        self.app = app
+        self.title("Добавить студента")
+        self.configure(bg=c["bg"])
+        self.resizable(False, False)
+        self.transient(app)
+        self.grab_set()
+
+        header(self, "Новый студент", "Фамилия и имя с заглавной буквы, без цифр")
+        body = card(self)
+        body.columnconfigure(0, weight=1)
+
+        ttk.Label(body, text="ГРУППА", style="Field.TLabel").grid(row=0, column=0, sticky="w")
+        self.group_var = tk.StringVar(value=app.group_var.get() or next(iter(app.groups), ""))
+        ttk.Combobox(body, textvariable=self.group_var, state="readonly", width=34,
+                     values=list(app.groups), font=(FONT, 10)).grid(
+            row=1, column=0, sticky="ew", pady=(4, 12))
+
+        self.last_var = tk.StringVar()
+        self.first_var = tk.StringVar()
+        for row, (label, var) in enumerate((("ФАМИЛИЯ", self.last_var),
+                                           ("ИМЯ", self.first_var))):
+            ttk.Label(body, text=label, style="Field.TLabel").grid(
+                row=2 + row * 2, column=0, sticky="w")
+            entry = ttk.Entry(body, textvariable=var, width=36, font=(FONT, 10))
+            entry.grid(row=3 + row * 2, column=0, sticky="ew", pady=(4, 12))
+            if row == 0:
+                entry.focus_set()
+
+        self.error_var = tk.StringVar()
+        tk.Label(body, textvariable=self.error_var, bg=c["card"], fg=c["error"],
+                 font=(FONT, 9), wraplength=320, justify="left").grid(
+            row=6, column=0, sticky="w")
+        ttk.Button(body, text="Добавить", style="Accent.TButton", command=self.submit,
+                   cursor="hand2").grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        ttk.Label(body, text="Enter — добавить, Esc — отмена", style="Hint.TLabel").grid(
+            row=8, column=0, sticky="e", pady=(10, 0))
+        self.bind("<Return>", lambda _e: self.submit())
+        self.bind("<Escape>", lambda _e: self.destroy())
+
+    def submit(self):
+        group = self.group_var.get()
+        if not group:
+            self.error_var.set("Выберите группу.")
+            return
+        result = {}
+
+        def write():
+            result["name"] = td.add_student(STUDENTS_FILE, group, self.last_var.get(),
+                                            self.first_var.get())
+        try:
+            if not self.app.write_with_retry(STUDENTS_FILE, write, parent=self):
+                return
+        except (td.InvalidNameError, td.DuplicateStudentError, td.SourceError) as exc:
+            self.error_var.set(str(exc))
+            return
+        last, first = result["name"]
+        self.app.student_added(group, last, first)
+        self.destroy()
 
 
 def main():

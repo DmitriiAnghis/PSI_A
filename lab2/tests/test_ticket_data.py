@@ -126,3 +126,62 @@ def test_journal_appends_and_keeps_history(tmp_path):
     assert after[:3] == before
     assert after[3][:4] == ["TI-235", "Anghis", "Dmitrii", 7] and after[3][5] == "да"
     assert [r[5] for r in after[1:]] == ["нет", "нет", "да"]
+
+
+# --- добавление студента ---
+
+@pytest.mark.parametrize("text, expected", [
+    ("Anghis", "Anghis"),
+    ("  Дмитрий  ", "Дмитрий"),
+    ("Jean-Luc", "Jean-Luc"),
+    ("O'Connor", "O'Connor"),
+    ("Van  der Meer", "Van der Meer"),
+])
+def test_validate_name_accepts_correct_names(text, expected):
+    assert td.validate_name(text) == expected
+
+
+@pytest.mark.parametrize("text, message", [
+    ("", "пустым"),
+    ("   ", "пустым"),
+    ("Ivan2", "цифры"),
+    ("3", "цифры"),
+    ("ivan", "заглавной"),
+    ("дмитрий", "заглавной"),
+    ("Ivan!", "только буквы"),
+    ("-Ivan", "только буквы"),
+    ("Ivan--Petrov", "только буквы"),
+])
+def test_validate_name_rejects_bad_names(text, message):
+    with pytest.raises(td.InvalidNameError, match=message):
+        td.validate_name(text)
+
+
+def test_add_student_appends_to_group_sheet(students):
+    assert td.add_student(students, "TI-237", " Ciobanu ", "Andrei") == ("Ciobanu", "Andrei")
+    groups = td.load_groups(students)
+    assert groups["TI-237"] == [("Ciobanu", "Andrei")]
+    assert len(groups["TI-235"]) == 2
+
+
+def test_add_student_rejects_invalid_name_without_writing(students):
+    before = students.read_bytes()
+    with pytest.raises(td.InvalidNameError):
+        td.add_student(students, "TI-235", "popescu", "Ion")
+    assert students.read_bytes() == before
+
+
+def test_add_student_rejects_duplicate_in_same_group(students):
+    with pytest.raises(td.DuplicateStudentError):
+        td.add_student(students, "TI-235", "Popescu", "Ion")
+    td.add_student(students, "TI-237", "Popescu", "Ion")
+
+
+def test_add_student_unknown_group(students):
+    with pytest.raises(td.SourceError):
+        td.add_student(students, "TI-999", "Popescu", "Ion")
+
+
+def test_close_in_excel_is_noop_without_excel(tmp_path):
+    from excel_closer import close_in_excel
+    assert close_in_excel(tmp_path / "results.xlsx") is False
