@@ -33,6 +33,10 @@ def make_docx(path, paragraphs):
     return path
 
 
+def rows_of(path, sheet):
+    return [list(r) for r in load_workbook(path)[sheet].iter_rows(values_only=True)]
+
+
 def rows(path):
     return [list(r) for r in load_workbook(path).active.iter_rows(values_only=True)]
 
@@ -185,3 +189,53 @@ def test_add_student_unknown_group(students):
 def test_close_in_excel_is_noop_without_excel(tmp_path):
     from excel_closer import close_in_excel
     assert close_in_excel(tmp_path / "results.xlsx") is False
+
+
+# --- группы, удаление, журнал ---
+
+@pytest.mark.parametrize("text, expected", [("TI-238", "TI-238"), (" FAF-231 ", "FAF-231"),
+                                            ("ТИ-235", "ТИ-235")])
+def test_validate_group_accepts(text, expected):
+    assert td.validate_group(text) == expected
+
+
+@pytest.mark.parametrize("text", ["", "ti-238", "238", "TI/238", "TI:1", "-TI", "A" * 32])
+def test_validate_group_rejects(text):
+    with pytest.raises(td.InvalidNameError):
+        td.validate_group(text)
+
+
+def test_add_group_creates_sheet_with_header(students):
+    assert td.add_group(students, "TI-238") == "TI-238"
+    groups = td.load_groups(students)
+    assert list(groups) == ["TI-235", "TI-237", "TI-238"]
+    assert groups["TI-238"] == []
+    assert rows_of(students, "TI-238") == [["Фамилия", "Имя"]]
+    td.add_student(students, "TI-238", "Rusu", "Maria")
+    assert td.load_groups(students)["TI-238"] == [("Rusu", "Maria")]
+
+
+def test_add_group_rejects_duplicate_case_insensitive(students):
+    with pytest.raises(td.DuplicateGroupError):
+        td.add_group(students, "TI-235")
+    with pytest.raises(td.InvalidNameError):
+        td.add_group(students, "ti-235")
+
+
+def test_remove_student(students):
+    assert td.remove_student(students, "TI-235", "Popescu", "Ion") is True
+    assert td.load_groups(students)["TI-235"] == [("Anghis", "Dmitrii")]
+    assert td.remove_student(students, "TI-235", "Popescu", "Ion") is False
+
+
+def test_results_and_stats(tmp_path):
+    path = tmp_path / "results.xlsx"
+    assert td.load_results(path) == []
+    td.append_result(path, "TI-235", "Anghis", "Dmitrii", 7, False)
+    td.append_result(path, "TI-235", "Popescu", "Ion", 7, False)
+    td.append_result(path, "TI-235", "Anghis", "Dmitrii", 7, True)
+    td.append_result(path, "TI-236", "Lungu", "Elena", 3, False)
+    rows_ = td.load_results(path)
+    assert len(rows_) == 4 and rows_[0][:4] == ("TI-235", "Anghis", "Dmitrii", "7")
+    stats = td.results_stats(rows_)
+    assert stats == {"issued": 4, "repeats": 1, "students": 3, "top_ticket": "7", "top_count": 2}

@@ -214,3 +214,101 @@ def add_student(path, group, last, first):
     ws.append([last, first])
     wb.save(path)
     return last, first
+
+
+# --- группы ---
+
+STUDENTS_HEADER = ["Фамилия", "Имя"]
+_GROUP_RE = re.compile(r"^[^\W\d_][\w-]*$")
+_SHEET_FORBIDDEN = set('[]:*?/\\')
+
+
+class DuplicateGroupError(ValueError):
+    """Группа с таким названием уже есть."""
+
+
+def validate_group(text):
+    """Название группы: начинается с заглавной буквы, дальше буквы, цифры, дефис.
+
+    Excel ограничивает имя листа 31 символом и запрещает []:*?/\\.
+    """
+    value = _cell_text(text).replace(" ", "")
+    if not value:
+        raise InvalidNameError("Группа: поле не может быть пустым.")
+    if len(value) > 31:
+        raise InvalidNameError("Группа: не длиннее 31 символа.")
+    if _SHEET_FORBIDDEN & set(value) or not _GROUP_RE.match(value):
+        raise InvalidNameError("Группа: только буквы, цифры и дефис, например TI-238.")
+    if not value[0].isupper():
+        raise InvalidNameError("Группа: должна начинаться с заглавной буквы.")
+    return value
+
+
+def add_group(path, name):
+    """Создаёт в students.xlsx лист новой группы с шапкой. Возвращает название."""
+    name = validate_group(name)
+    if os.path.exists(path):
+        wb = load_workbook(path)
+    else:
+        wb = Workbook()
+        wb.remove(wb.active)
+    if name.casefold() in (title.casefold() for title in wb.sheetnames):
+        wb.close()
+        raise DuplicateGroupError(f"Группа {name} уже есть.")
+    ws = wb.create_sheet(name)
+    ws.append(STUDENTS_HEADER)
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 16
+    wb.save(path)
+    return name
+
+
+def remove_student(path, group, last, first):
+    """Удаляет первую строку студента из листа группы. Возвращает True, если нашёл."""
+    wb = load_workbook(path)
+    if group not in wb.sheetnames:
+        wb.close()
+        raise SourceError(f"В {os.path.basename(path)} нет листа группы {group}")
+    ws = wb[group]
+    target = (last.strip().casefold(), first.strip().casefold())
+    for index, row in enumerate(ws.iter_rows(min_row=2, max_col=2, values_only=True), start=2):
+        l, f = (_cell_text(v) for v in (tuple(row) + (None, None))[:2])
+        if (l.casefold(), f.casefold()) == target:
+            ws.delete_rows(index)
+            wb.save(path)
+            return True
+    wb.close()
+    return False
+
+
+# --- журнал ---
+
+def load_results(path):
+    """Строки results.xlsx без шапки: [(группа, фамилия, имя, билет, дата, повтор)]."""
+    if not os.path.exists(path):
+        return []
+    wb = load_workbook(path, read_only=True)
+    try:
+        rows = []
+        for row in wb.active.iter_rows(min_row=2, max_col=6, values_only=True):
+            values = (tuple(row) + (None,) * 6)[:6]
+            if any(v is not None for v in values):
+                rows.append(tuple(_cell_text(v) for v in values))
+        return rows
+    finally:
+        wb.close()
+
+
+def results_stats(rows):
+    """Сводка по журналу: выдано, повторов, студентов, самый частый билет."""
+    issued = len(rows)
+    repeats = sum(1 for r in rows if r[5].casefold() == "да")
+    students = len({_key(r[0], r[1], r[2]) for r in rows})
+    counts = {}
+    for r in rows:
+        if r[5].casefold() != "да" and r[3]:
+            counts[r[3]] = counts.get(r[3], 0) + 1
+    top = max(counts.items(), key=lambda kv: (kv[1], -int(kv[0]) if kv[0].isdigit() else 0),
+              default=None)
+    return {"issued": issued, "repeats": repeats, "students": students,
+            "top_ticket": top[0] if top else None, "top_count": top[1] if top else 0}
