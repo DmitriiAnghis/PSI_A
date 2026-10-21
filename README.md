@@ -6,7 +6,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Android-7F52FF?logo=kotlin&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-213%20passed-2ea44f)
+![Tests](https://img.shields.io/badge/tests-227%20passed-2ea44f)
 ![Labs](https://img.shields.io/badge/labs-4%2F4-success)
 
 </div>
@@ -14,7 +14,7 @@
 | № | Тема | Где | Стек | Тесты |
 |:-:|---|---|---|:-:|
 | 1 | 🖥️ Консольный генератор экзаменационных билетов | [`lab1/`](lab1/) | Python, openpyxl | 23 ✅ |
-| 2 | 🪟 Генератор билетов с графическим интерфейсом | [`lab2/`](lab2/) | Python, Tkinter, openpyxl, python-docx | 31 ✅ |
+| 2 | 🪟 Генератор билетов с графическим интерфейсом | [`lab2/`](lab2/) | Python, Tkinter, openpyxl, python-docx | 45 ✅ |
 | 3 | 💱 Конвертер валют BNM (Spec-Driven Development) | [currency-converter-sdd](https://github.com/DmitriiAnghis/currency-converter-sdd) | Python, Tkinter, httpx · Spec Kit, Copilot, Antigravity | 126 ✅ |
 | 4 | 📱 Мобильный конвертер валют BNM | [currency-mobile](https://github.com/DmitriiAnghis/currency-mobile) | Kotlin, Jetpack Compose | 33 ✅ |
 
@@ -83,22 +83,26 @@ python -m pytest -v          # тесты
 python make_sample_data.py   # пересоздать тестовые students.xlsx и tickets.docx
 ```
 
-- Окно Tkinter: выбор **группы** (листы `data/students.xlsx`), затем **студента**, затем «Сгенерировать билет».
-- Показывает номер билета и три вопроса из `data/tickets.docx`, сразу записывает строку в `data/results.xlsx`.
-- Повторный запрос для того же студента выдаёт **тот же билет** и пишет «Повтор = да».
-- Нет исходного файла: понятное сообщение. `results.xlsx` открыт в Excel: окно «Файл занят» с кнопкой «Повторить».
-- **Esc** закрывает окно билета, приложение остаётся открытым.
-- Кнопка **«+ Добавить студента»**: фамилия и имя с заглавной буквы, без цифр, без повторов в группе.
-- Если Excel держит `results.xlsx` открытым, программа сама сохраняет и закрывает эту книгу и записывает билет.
+Всё приложение работает в **одном окне с вкладками**, без всплывающих окон:
+
+| Вкладка | Что делает |
+|---|---|
+| **Билет** | Выбор группы и студента, «Сгенерировать билет». Номер и три вопроса из `data/tickets.docx` показываются прямо на странице, строка сразу пишется в `data/results.xlsx`. Повторный запрос выдаёт **тот же билет** и пишет «Повтор = да». **Esc** очищает карточку билета. |
+| **Студенты** | Список групп и студентов, поиск, **добавление группы**, **добавление студента** (с заглавной буквы, без цифр, без повторов), удаление, «Выдать билет» по двойному щелчку. |
+| **Журнал** | Таблица `results.xlsx` с фильтром по группе, сводка: выдано, студентов, повторов, самый частый билет. Кнопка «Открыть в Excel». |
+| **Билеты** | Все билеты и вопросы из `tickets.docx`. |
+
+- Если `results.xlsx` или `students.xlsx` открыт в Excel, программа сама сохраняет и закрывает эту книгу и записывает данные. Если не получилось, под шапкой появляется полоса «Файл занят» с кнопкой «Повторить».
+- Сообщения об успехе и ошибках показываются полосой под шапкой, а не отдельными окнами.
 
 <table>
 <tr>
-<td align="center"><b>Главное окно</b><br><img src="screenshots/lab2/lab2_group_student_selected.png" width="360" alt="Главное окно"></td>
-<td align="center"><b>Билет</b><br><img src="screenshots/lab2/lab2_ticket_window.png" width="320" alt="Билет"></td>
+<td width="50%"><b>Билет</b><br><img src="screenshots/lab2/redesign/lab2_tab_ticket_repeat.png" alt="Билет"></td>
+<td width="50%"><b>Студенты и группы</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_added.png" alt="Студенты"></td>
 </tr>
 <tr>
-<td align="center"><b>Повторный запрос</b><br><img src="screenshots/lab2/lab2_ticket_repeat.png" width="320" alt="Повтор"></td>
-<td align="center"><b>Файл занят</b><br><img src="screenshots/lab2/lab2_locked_dialog.png" width="360" alt="Файл занят"></td>
+<td><b>Проверка ввода</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_errors.png" alt="Ошибки ввода"></td>
+<td><b>Журнал</b><br><img src="screenshots/lab2/redesign/lab2_tab_journal.png" alt="Журнал"></td>
 </tr>
 </table>
 
