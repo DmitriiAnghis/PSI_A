@@ -6,7 +6,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Android-7F52FF?logo=kotlin&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-227%20passed-2ea44f)
+![Tests](https://img.shields.io/badge/tests-237%20passed-2ea44f)
 ![Labs](https://img.shields.io/badge/labs-4%2F4-success)
 
 </div>
@@ -14,7 +14,7 @@
 | № | Тема | Где | Стек | Тесты |
 |:-:|---|---|---|:-:|
 | 1 | 🖥️ Консольный генератор экзаменационных билетов | [`lab1/`](lab1/) | Python, openpyxl | 23 ✅ |
-| 2 | 🪟 Генератор билетов с графическим интерфейсом | [`lab2/`](lab2/) | Python, Tkinter, openpyxl, python-docx | 45 ✅ |
+| 2 | 🪟 Генератор билетов с графическим интерфейсом | [`lab2/`](lab2/) | Python, Tkinter, openpyxl, python-docx | 55 ✅ |
 | 3 | 💱 Конвертер валют BNM (Spec-Driven Development) | [currency-converter-sdd](https://github.com/DmitriiAnghis/currency-converter-sdd) | Python, Tkinter, httpx · Spec Kit, Copilot, Antigravity | 126 ✅ |
 | 4 | 📱 Мобильный конвертер валют BNM | [currency-mobile](https://github.com/DmitriiAnghis/currency-mobile) | Kotlin, Jetpack Compose | 33 ✅ |
 
@@ -88,12 +88,12 @@ python make_sample_data.py   # пересоздать тестовые students.
 | Вкладка | Что делает |
 |---|---|
 | **Билет** | Выбор группы и студента, «Сгенерировать билет». Номер и три вопроса из `data/tickets.docx` показываются прямо на странице, строка сразу пишется в `data/results.xlsx`. Повторный запрос выдаёт **тот же билет** и пишет «Повтор = да». **Esc** очищает карточку билета. |
-| **Студенты** | Список групп и студентов, поиск, **добавление группы**, **добавление студента** (с заглавной буквы, без цифр, без повторов), удаление, «Выдать билет» по двойному щелчку. |
-| **Журнал** | Таблица `results.xlsx` с фильтром по группе, сводка: выдано, студентов, повторов, самый частый билет. Кнопка «Открыть в Excel». |
-| **Билеты** | Все билеты и вопросы из `tickets.docx`. |
+| **Студенты** | Группы и студенты, поиск, **добавление и удаление группы** (удалить можно только пустую), **добавление студента** (с заглавной буквы, без цифр, без повторов), удаление, «Выдать билет» по двойному щелчку. |
+| **Журнал** | Таблица `results.xlsx` с фильтром по группе, сводка: выдано, студентов, повторов, самый частый билет. **Экспорт в CSV** и «Открыть в Excel». |
+| **Билеты** | Все билеты из `tickets.docx` с поиском. **Добавить**, **изменить** и **удалить** билет: три вопроса, номер можно не указывать (возьмётся следующий свободный). Изменения сразу сохраняются в `tickets.docx`. |
 
-- Если `results.xlsx` или `students.xlsx` открыт в Excel, программа сама сохраняет и закрывает эту книгу и записывает данные. Если не получилось, под шапкой появляется полоса «Файл занят» с кнопкой «Повторить».
-- Сообщения об успехе и ошибках показываются полосой под шапкой, а не отдельными окнами.
+- Если `results.xlsx`, `students.xlsx` или `tickets.docx` открыт в Excel или Word, программа сама сохраняет и закрывает этот файл и записывает данные. Если не получилось, под шапкой появляется полоса «Файл занят» с кнопкой «Повторить».
+- Сообщения, ошибки и подтверждения удаления показываются полосой под шапкой, а не отдельными окнами.
 
 <table>
 <tr>
@@ -101,8 +101,12 @@ python make_sample_data.py   # пересоздать тестовые students.
 <td width="50%"><b>Студенты и группы</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_added.png" alt="Студенты"></td>
 </tr>
 <tr>
-<td><b>Проверка ввода</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_errors.png" alt="Ошибки ввода"></td>
-<td><b>Журнал</b><br><img src="screenshots/lab2/redesign/lab2_tab_journal.png" alt="Журнал"></td>
+<td><b>Билеты: добавление, изменение, удаление</b><br><img src="screenshots/lab2/redesign/lab2_tab_tickets_edit.png" alt="Билеты"></td>
+<td><b>Журнал и экспорт CSV</b><br><img src="screenshots/lab2/redesign/lab2_tab_journal_export.png" alt="Журнал"></td>
+</tr>
+<tr>
+<td><b>Проверка ввода студента и группы</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_errors.png" alt="Ошибки ввода"></td>
+<td><b>Проверка вопросов билета</b><br><img src="screenshots/lab2/redesign/lab2_tab_tickets_error.png" alt="Ошибка в билете"></td>
 </tr>
 </table>
 

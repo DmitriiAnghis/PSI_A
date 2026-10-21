@@ -239,3 +239,70 @@ def test_results_and_stats(tmp_path):
     assert len(rows_) == 4 and rows_[0][:4] == ("TI-235", "Anghis", "Dmitrii", "7")
     stats = td.results_stats(rows_)
     assert stats == {"issued": 4, "repeats": 1, "students": 3, "top_ticket": "7", "top_count": 2}
+
+
+# --- билеты в tickets.docx, удаление группы, экспорт ---
+
+QS = ["Первый вопрос", "Второй вопрос", "Третий вопрос"]
+
+
+@pytest.fixture
+def tickets_doc(tmp_path):
+    return make_docx(tmp_path / "tickets.docx", [
+        "Билет 1", "1. Вопрос А", "2. Вопрос Б", "3. Вопрос В", "",
+        "Билет 2", "1. Вопрос Г", "2. Вопрос Д", "3. Вопрос Е", "",
+    ])
+
+
+def test_add_ticket_next_number(tickets_doc):
+    assert td.add_ticket(tickets_doc, QS) == 3
+    tickets = td.load_tickets(tickets_doc)
+    assert sorted(tickets) == [1, 2, 3] and tickets[3] == QS
+
+
+def test_add_ticket_with_number_and_errors(tickets_doc):
+    assert td.add_ticket(tickets_doc, QS, number=" 10 ") == 10
+    for number in ("2", "abc", "0"):
+        with pytest.raises(td.TicketError):
+            td.add_ticket(tickets_doc, QS, number=number)
+
+
+@pytest.mark.parametrize("questions", [["", "Второй", "Третий"], ["Ok", "Второй", "Третий"],
+                                       ["Один", "один", "Три"], ["Один", "Два"]])
+def test_validate_questions_rejects(questions):
+    with pytest.raises(td.TicketError):
+        td.validate_questions(questions)
+
+
+def test_update_ticket_keeps_position(tickets_doc):
+    td.update_ticket(tickets_doc, 1, QS)
+    tickets = td.load_tickets(tickets_doc)
+    assert tickets[1] == QS and tickets[2] == ["Вопрос Г", "Вопрос Д", "Вопрос Е"]
+    texts = [p.text for p in Document(tickets_doc).paragraphs if p.text]
+    assert texts.index("Билет 1") < texts.index("1. Первый вопрос") < texts.index("Билет 2")
+    with pytest.raises(td.TicketError):
+        td.update_ticket(tickets_doc, 5, QS)
+
+
+def test_remove_ticket(tickets_doc):
+    assert td.remove_ticket(tickets_doc, 1) is True
+    assert list(td.load_tickets(tickets_doc)) == [2]
+    assert td.remove_ticket(tickets_doc, 1) is False
+
+
+def test_remove_group_only_when_empty(students):
+    with pytest.raises(td.InvalidNameError):
+        td.remove_group(students, "TI-235")
+    td.remove_group(students, "TI-237")
+    assert list(td.load_groups(students)) == ["TI-235"]
+    td.remove_student(students, "TI-235", "Anghis", "Dmitrii")
+    td.remove_student(students, "TI-235", "Popescu", "Ion")
+    with pytest.raises(td.InvalidNameError, match="последнюю"):
+        td.remove_group(students, "TI-235")
+
+
+def test_export_results_csv(tmp_path):
+    out = td.export_results_csv([("TI-235", "Anghis", "Dmitrii", "7", "21.10.2026 10:00:00", "нет")],
+                                tmp_path / "journal.csv")
+    text = Path(out).read_text(encoding="utf-8-sig").splitlines()
+    assert text[0].startswith("Группа;Фамилия") and text[1] == "TI-235;Anghis;Dmitrii;7;21.10.2026 10:00:00;нет"
