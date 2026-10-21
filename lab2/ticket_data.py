@@ -312,3 +312,135 @@ def results_stats(rows):
               default=None)
     return {"issued": issued, "repeats": repeats, "students": students,
             "top_ticket": top[0] if top else None, "top_count": top[1] if top else 0}
+
+
+# --- редактирование билетов в tickets.docx ---
+
+class TicketError(ValueError):
+    """Ошибка в номере или вопросах билета."""
+
+
+def validate_questions(questions):
+    """Ровно три непустых вопроса, каждый не короче 3 символов."""
+    cleaned = [" ".join(_cell_text(q).split()) for q in questions]
+    if len(cleaned) != QUESTIONS_PER_TICKET:
+        raise TicketError(f"В билете должно быть {QUESTIONS_PER_TICKET} вопроса.")
+    for i, question in enumerate(cleaned, 1):
+        if not question:
+            raise TicketError(f"Вопрос {i}: поле не может быть пустым.")
+        if len(question) < 3:
+            raise TicketError(f"Вопрос {i}: слишком короткий.")
+    if len({q.casefold() for q in cleaned}) != len(cleaned):
+        raise TicketError("Вопросы в одном билете не должны повторяться.")
+    return cleaned
+
+
+def _ticket_blocks(doc):
+    """{номер: [абзацы билета]} — заголовок «Билет N» и всё до следующего заголовка."""
+    blocks, current = {}, None
+    for paragraph in doc.paragraphs:
+        header = _TICKET_RE.match(paragraph.text)
+        if header:
+            current = int(header.group(1))
+            blocks.setdefault(current, []).append(paragraph)
+        elif current is not None:
+            blocks[current].append(paragraph)
+    return blocks
+
+
+def _open_tickets(path):
+    if not os.path.exists(path):
+        raise SourceError(f"Не найден файл с билетами: {path}")
+    return Document(path)
+
+
+def _remove_paragraphs(paragraphs):
+    for paragraph in paragraphs:
+        element = paragraph._element
+        element.getparent().remove(element)
+
+
+def _ticket_paragraph_texts(number, questions):
+    return [f"Билет {number}"] + [f"{i}. {q}" for i, q in enumerate(questions, 1)] + [""]
+
+
+def add_ticket(path, questions, number=None):
+    """Дописывает билет в конец tickets.docx. Номер по умолчанию — следующий свободный."""
+    questions = validate_questions(questions)
+    doc = _open_tickets(path)
+    used = set(_ticket_blocks(doc))
+    if number is None:
+        number = max(used, default=0) + 1
+    else:
+        try:
+            number = int(str(number).strip())
+        except ValueError:
+            raise TicketError("Номер билета должен быть целым числом.") from None
+        if number < 1:
+            raise TicketError("Номер билета должен быть больше нуля.")
+        if number in used:
+            raise TicketError(f"Билет № {number} уже есть.")
+    for text in _ticket_paragraph_texts(number, questions):
+        doc.add_paragraph(text)
+    doc.save(path)
+    return number
+
+
+def update_ticket(path, number, questions):
+    """Заменяет вопросы билета, сохраняя его место в документе."""
+    questions = validate_questions(questions)
+    doc = _open_tickets(path)
+    blocks = _ticket_blocks(doc)
+    if number not in blocks:
+        raise TicketError(f"Билета № {number} нет в tickets.docx.")
+    header, *rest = blocks[number]
+    _remove_paragraphs(rest)
+    anchor = header
+    for text in _ticket_paragraph_texts(number, questions)[1:]:
+        new = doc.add_paragraph(text)  # создаём в конце и переносим после заголовка
+        anchor._element.addnext(new._element)
+        anchor = new
+    doc.save(path)
+    return questions
+
+
+def remove_ticket(path, number):
+    """Удаляет билет (заголовок и его вопросы). Возвращает True, если нашёл."""
+    doc = _open_tickets(path)
+    blocks = _ticket_blocks(doc)
+    if number not in blocks:
+        return False
+    _remove_paragraphs(blocks[number])
+    doc.save(path)
+    return True
+
+
+# --- от себя: удаление пустой группы, экспорт журнала ---
+
+def remove_group(path, name):
+    """Удаляет лист группы, только если в ней нет студентов."""
+    wb = load_workbook(path)
+    if name not in wb.sheetnames:
+        wb.close()
+        raise SourceError(f"Группы {name} нет.")
+    ws = wb[name]
+    has_students = any(any(_cell_text(v) for v in row)
+                       for row in ws.iter_rows(min_row=2, max_col=2, values_only=True))
+    if has_students:
+        wb.close()
+        raise InvalidNameError(f"В группе {name} есть студенты: сначала удалите их.")
+    if len(wb.sheetnames) == 1:
+        wb.close()
+        raise InvalidNameError("Нельзя удалить последнюю группу.")
+    wb.remove(ws)
+    wb.save(path)
+
+
+def export_results_csv(rows, path):
+    """Сохраняет строки журнала в CSV (разделитель «;», UTF-8 с BOM — открывается в Excel)."""
+    import csv
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow(RESULTS_HEADER)
+        writer.writerows(rows)
+    return path

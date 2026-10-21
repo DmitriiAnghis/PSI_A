@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 import ticket_data as td
-from excel_closer import close_in_excel
+from excel_closer import close_in_office
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -156,8 +156,8 @@ class TicketApp(tk.Tk):
         self.tickets = tickets
         self.title("Генератор экзаменационных билетов")
         self.configure(bg=COLORS["bg"])
-        self.geometry("900x620")
-        self.minsize(820, 560)
+        self.geometry("980x700")
+        self.minsize(900, 660)
         setup_styles(self)
 
         self._build_header()
@@ -228,7 +228,7 @@ class TicketApp(tk.Tk):
 
     # --- запись в xlsx ---
 
-    def write_xlsx(self, path, write, retry):
+    def write_file(self, path, write, retry):
         """Выполняет запись. Если файл открыт в Excel, сначала пробует закрыть его
         сама; если не вышло, показывает полосу с кнопкой «Повторить».
         Возвращает True при успехе."""
@@ -237,14 +237,14 @@ class TicketApp(tk.Tk):
             return True
         except PermissionError:
             pass
-        if close_in_excel(path):
+        if close_in_office(path):
             try:
                 write()
                 return True
             except PermissionError:
                 pass
-        self.notify(f"Файл {os.path.basename(path)} открыт в другой программе (например, в "
-                    "Excel). Закройте его и нажмите «Повторить».", "error", action=retry)
+        self.notify(f"Файл {os.path.basename(path)} открыт в другой программе (Excel или Word). "
+                    "Закройте его и нажмите «Повторить».", "error", action=retry)
         return False
 
     # --- общее состояние ---
@@ -257,6 +257,14 @@ class TicketApp(tk.Tk):
         self.ticket_tab.set_groups(names)
         self.students_tab.set_groups(names)
         self.journal_tab.set_groups(names)
+
+    def reload_tickets(self):
+        try:
+            self.tickets = td.load_tickets(TICKETS_FILE)
+        except td.SourceError:
+            self.tickets = {}
+        self.refresh_groups()
+        self.tickets_tab.show_tickets()
 
     def on_tab_changed(self, _event=None):
         if self.notebook.select() == str(self.journal_tab):
@@ -350,10 +358,13 @@ class TicketTab(ttk.Frame):
         student = self.selected_student()
         if student is None:
             return
+        if not self.app.tickets:
+            self.app.notify("Нет ни одного билета: добавьте билеты на вкладке «Билеты».", "error")
+            return
         group = self.group_var.get()
         last, first = student
         number, repeat = td.assign_ticket(RESULTS_FILE, self.app.tickets, group, last, first)
-        saved = self.app.write_xlsx(
+        saved = self.app.write_file(
             RESULTS_FILE,
             lambda: td.append_result(RESULTS_FILE, group, last, first, number, repeat),
             retry=self.on_generate)
@@ -434,8 +445,11 @@ class StudentsTab(ttk.Frame):
         entry.bind("<Return>", lambda _e: self.on_add_group())
         ttk.Button(left, text="+ Добавить группу", style="Secondary.TButton",
                    command=self.on_add_group, cursor="hand2").grid(row=4, column=0, sticky="ew")
+        self.del_group_btn = ttk.Button(left, text="Удалить пустую группу", style="Danger.TButton",
+                                        command=self.on_delete_group, cursor="hand2")
+        self.del_group_btn.grid(row=5, column=0, sticky="ew", pady=(8, 0))
         self.group_error = label(left, "", "error", size=9, wraplength=210, justify="left")
-        self.group_error.grid(row=5, column=0, sticky="w", pady=(6, 0))
+        self.group_error.grid(row=6, column=0, sticky="w", pady=(6, 0))
 
         # студенты
         right = card(self, row=0, column=1, sticky="nsew")
@@ -547,7 +561,7 @@ class StudentsTab(ttk.Frame):
         def write():
             result["name"] = td.add_group(STUDENTS_FILE, name)
         try:
-            if not self.app.write_xlsx(STUDENTS_FILE, write, retry=self.on_add_group):
+            if not self.app.write_file(STUDENTS_FILE, write, retry=self.on_add_group):
                 return
         except (td.InvalidNameError, td.DuplicateGroupError) as exc:
             self.group_error.configure(text=str(exc))
@@ -558,6 +572,29 @@ class StudentsTab(ttk.Frame):
         self.app.refresh_groups()
         self.set_groups(list(self.app.groups), select=group)
         self.app.notify(f"Группа {group} добавлена.")
+
+    def on_delete_group(self):
+        self.group_error.configure(text="")
+        group = self.current_group()
+        if not group:
+            return
+        if self.app.groups.get(group):
+            self.group_error.configure(text=f"В группе {group} есть студенты: сначала удалите их.")
+            return
+        self.app.notify(f"Удалить пустую группу {group}?", "warn",
+                        action=lambda: self.delete_group(group), action_text="Удалить")
+
+    def delete_group(self, group):
+        try:
+            if not self.app.write_file(STUDENTS_FILE, lambda: td.remove_group(STUDENTS_FILE, group),
+                                       retry=lambda: self.delete_group(group)):
+                return
+        except (td.InvalidNameError, td.SourceError) as exc:
+            self.group_error.configure(text=str(exc))
+            return
+        self.app.groups.pop(group, None)
+        self.app.refresh_groups()
+        self.app.notify(f"Группа {group} удалена.", "warn")
 
     def on_add_student(self):
         self.student_error.configure(text="")
@@ -571,7 +608,7 @@ class StudentsTab(ttk.Frame):
             result["name"] = td.add_student(STUDENTS_FILE, group, self.last_var.get(),
                                             self.first_var.get())
         try:
-            if not self.app.write_xlsx(STUDENTS_FILE, write, retry=self.on_add_student):
+            if not self.app.write_file(STUDENTS_FILE, write, retry=self.on_add_student):
                 return
         except (td.InvalidNameError, td.DuplicateStudentError, td.SourceError) as exc:
             self.student_error.configure(text=str(exc))
@@ -606,7 +643,7 @@ class StudentsTab(ttk.Frame):
 
         def write():
             result["ok"] = td.remove_student(STUDENTS_FILE, group, last, first)
-        if not self.app.write_xlsx(STUDENTS_FILE, write, retry=lambda: self.delete_student(group, last, first)):
+        if not self.app.write_file(STUDENTS_FILE, write, retry=lambda: self.delete_student(group, last, first)):
             return
         students = self.app.groups[group]
         if (last, first) in students:
@@ -655,6 +692,8 @@ class JournalTab(ttk.Frame):
         ttk.Label(bar, text="Журнал выдачи", style="Title.TLabel").pack(side="left")
         ttk.Button(bar, text="Открыть в Excel", style="Secondary.TButton",
                    command=self.open_file, cursor="hand2").pack(side="right")
+        ttk.Button(bar, text="Экспорт CSV", style="Secondary.TButton",
+                   command=self.export_csv, cursor="hand2").pack(side="right", padx=(0, 8))
         ttk.Button(bar, text="Обновить", style="Secondary.TButton", command=self.reload,
                    cursor="hand2").pack(side="right", padx=(0, 8))
         self.filter_var = tk.StringVar(value=ALL_GROUPS)
@@ -682,6 +721,7 @@ class JournalTab(ttk.Frame):
         group = self.filter_var.get()
         if group != ALL_GROUPS:
             rows = [r for r in rows if r[0] == group]
+        self.rows = rows
         rows = list(reversed(rows))  # новые сверху
         self.tree.delete(*self.tree.get_children())
         for i, row in enumerate(rows):
@@ -696,6 +736,21 @@ class JournalTab(ttk.Frame):
         self.tile_vars["top"].set(f"№ {stats['top_ticket']}  ×{stats['top_count']}"
                                   if stats["top_ticket"] else "—")
 
+    def export_csv(self):
+        """Сохраняет то, что сейчас показано в таблице (с учётом фильтра), в data/*.csv."""
+        from datetime import datetime
+        self.reload()
+        rows = getattr(self, "rows", [])
+        if not rows:
+            self.app.notify("Нечего экспортировать: журнал пуст.", "warn")
+            return
+        group = self.filter_var.get()
+        suffix = "" if group == ALL_GROUPS else f"_{group}"
+        name = f"journal{suffix}_{datetime.now():%Y%m%d_%H%M}.csv"
+        path = os.path.join(os.path.dirname(RESULTS_FILE), name)
+        td.export_results_csv(rows, path)
+        self.app.notify(f"Журнал сохранён: {path}")
+
     def open_file(self):
         if not os.path.exists(RESULTS_FILE):
             self.app.notify("Журнал ещё пуст: выдайте первый билет.", "warn")
@@ -707,34 +762,183 @@ class JournalTab(ttk.Frame):
 
 
 class TicketsTab(ttk.Frame):
-    """Вкладка «Билеты»: все билеты из tickets.docx с вопросами."""
+    """Вкладка «Билеты»: список билетов из tickets.docx, добавление, изменение, удаление."""
 
     def __init__(self, notebook, app):
         super().__init__(notebook, style="Bg.TFrame", padding=(20, 16, 20, 20))
+        self.app = app
         self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, minsize=340)
         self.rowconfigure(0, weight=1)
-        body = card(self, row=0, column=0, sticky="nsew")
+
+        body = card(self, row=0, column=0, sticky="nsew", padx=(0, 16))
         body.columnconfigure(0, weight=1)
         body.rowconfigure(1, weight=1)
-        ttk.Label(body, text=f"Билеты из tickets.docx: {len(app.tickets)}",
-                  style="Title.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 10))
+        head = ttk.Frame(body, style="Card.TFrame")
+        head.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self.title_var = tk.StringVar()
+        ttk.Label(head, textvariable=self.title_var, style="Title.TLabel").pack(side="left")
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *_: self.show_tickets())
+        ttk.Entry(head, textvariable=self.search_var, width=18, font=(FONT, 10)).pack(side="right")
+        ttk.Label(head, text="Поиск", style="Hint.TLabel").pack(side="right", padx=(0, 6))
+
         frame = ttk.Frame(body, style="Card.TFrame")
         frame.grid(row=1, column=0, sticky="nsew")
-        tree = ttk.Treeview(frame, columns=("q",), show="tree", selectmode="browse")
-        tree.column("#0", width=900, stretch=True)
-        tree.tag_configure("ticket", font=(FONT, 10, "bold"), foreground=COLORS["accent"])
-        scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scroll.set)
-        tree.pack(side="left", fill="both", expand=True)
+        self.tree = ttk.Treeview(frame, show="tree", selectmode="browse")
+        self.tree.column("#0", width=420, stretch=True)
+        self.tree.tag_configure("ticket", font=(FONT, 10, "bold"), foreground=COLORS["accent"])
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-        for number in sorted(app.tickets):
-            parent = tree.insert("", "end", text=f"Билет № {number}", open=True, tags=("ticket",))
-            for i, question in enumerate(app.tickets[number], 1):
-                tree.insert(parent, "end", text=f"{i}. {question}")
+        self.tree.bind("<<TreeviewSelect>>", lambda _e: self.on_select())
         ttk.Label(body, text="Билеты, где меньше трёх вопросов, пропущены и записаны в "
                   "tickets.log", style="Hint.TLabel").grid(row=2, column=0, sticky="w",
                                                            pady=(10, 0))
 
+        form = card(self, row=0, column=1, sticky="nsew")
+        form.columnconfigure(0, weight=1)
+        self.form_title = tk.StringVar(value="Новый билет")
+        ttk.Label(form, textvariable=self.form_title, style="Title.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 12))
+        ttk.Label(form, text="НОМЕР (пусто — следующий свободный)", style="Field.TLabel").grid(
+            row=1, column=0, sticky="w")
+        self.number_var = tk.StringVar()
+        self.number_entry = ttk.Entry(form, textvariable=self.number_var, width=10,
+                                      font=(FONT, 10))
+        self.number_entry.grid(row=2, column=0, sticky="w", pady=(4, 12))
+        self.question_vars = []
+        for i in range(td.QUESTIONS_PER_TICKET):
+            ttk.Label(form, text=f"ВОПРОС {i + 1}", style="Field.TLabel").grid(
+                row=3 + i * 2, column=0, sticky="w")
+            var = tk.StringVar()
+            ttk.Entry(form, textvariable=var, font=(FONT, 10)).grid(
+                row=4 + i * 2, column=0, sticky="ew", pady=(4, 8))
+            self.question_vars.append(var)
+        self.error = label(form, "", "error", size=9, wraplength=300, justify="left")
+        self.error.grid(row=9, column=0, sticky="w")
+        self.add_btn = ttk.Button(form, text="+ Добавить билет", style="Accent.TButton",
+                                  command=self.on_add, cursor="hand2")
+        self.add_btn.grid(row=10, column=0, sticky="ew", pady=(6, 0))
+        self.save_btn = ttk.Button(form, text="Сохранить изменения", style="Secondary.TButton",
+                                   command=self.on_save, cursor="hand2")
+        self.save_btn.grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        row = ttk.Frame(form, style="Card.TFrame")
+        row.grid(row=12, column=0, sticky="ew", pady=(8, 0))
+        row.columnconfigure(0, weight=1)
+        row.columnconfigure(1, weight=1)
+        self.delete_btn = ttk.Button(row, text="Удалить билет", style="Danger.TButton",
+                                     command=self.on_delete, cursor="hand2")
+        self.delete_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(row, text="Очистить", style="Secondary.TButton", command=self.clear_form,
+                   cursor="hand2").grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        self.selected = None
+        self.show_tickets()
+        self.clear_form()
+
+    # --- список ---
+
+    def show_tickets(self):
+        query = self.search_var.get().strip().casefold()
+        tickets = self.app.tickets
+        self.title_var.set(f"Билеты из tickets.docx: {len(tickets)}")
+        self.tree.delete(*self.tree.get_children())
+        for number in sorted(tickets):
+            questions = tickets[number]
+            if query and query not in " ".join(questions).casefold() and query != str(number):
+                continue
+            parent = self.tree.insert("", "end", iid=f"t{number}", text=f"Билет № {number}",
+                                      open=True, tags=("ticket",))
+            for i, question in enumerate(questions, 1):
+                self.tree.insert(parent, "end", text=f"{i}. {question}")
+        if self.selected in tickets and self.tree.exists(f"t{self.selected}"):
+            self.tree.selection_set(f"t{self.selected}")
+
+    def selected_number(self):
+        selection = self.tree.selection()
+        if not selection:
+            return None
+        item = selection[0]
+        parent = self.tree.parent(item) or item
+        return int(parent[1:])
+
+    def on_select(self):
+        number = self.selected_number()
+        if number is None or number not in self.app.tickets:
+            return
+        self.selected = number
+        self.form_title.set(f"Билет № {number}")
+        self.number_var.set(str(number))
+        self.number_entry.state(["disabled"])
+        for var, question in zip(self.question_vars, self.app.tickets[number]):
+            var.set(question)
+        self.error.configure(text="")
+        self.save_btn.state(["!disabled"])
+        self.delete_btn.state(["!disabled"])
+        self.add_btn.state(["disabled"])
+
+    def clear_form(self):
+        self.selected = None
+        self.tree.selection_remove(*self.tree.selection())
+        self.form_title.set("Новый билет")
+        self.number_entry.state(["!disabled"])
+        self.number_var.set("")
+        for var in self.question_vars:
+            var.set("")
+        self.error.configure(text="")
+        self.save_btn.state(["disabled"])
+        self.delete_btn.state(["disabled"])
+        self.add_btn.state(["!disabled"])
+
+    # --- действия ---
+
+    def questions(self):
+        return [var.get() for var in self.question_vars]
+
+    def _run(self, write, retry):
+        try:
+            return self.app.write_file(TICKETS_FILE, write, retry=retry)
+        except (td.TicketError, td.SourceError) as exc:
+            self.error.configure(text=str(exc))
+            return False
+
+    def on_add(self):
+        self.error.configure(text="")
+        number = self.number_var.get().strip() or None
+        result = {}
+
+        def write():
+            result["n"] = td.add_ticket(TICKETS_FILE, self.questions(), number=number)
+        if self._run(write, self.on_add):
+            self.app.reload_tickets()
+            self.clear_form()
+            self.app.notify(f"Билет № {result['n']} добавлен в tickets.docx.")
+
+    def on_save(self):
+        number = self.selected
+        if number is None:
+            return
+        self.error.configure(text="")
+        if self._run(lambda: td.update_ticket(TICKETS_FILE, number, self.questions()),
+                     self.on_save):
+            self.app.reload_tickets()
+            self.selected = number
+            self.show_tickets()
+            self.app.notify(f"Билет № {number} сохранён.")
+
+    def on_delete(self):
+        number = self.selected
+        if number is None:
+            return
+        self.app.notify(f"Удалить билет № {number} из tickets.docx? Записи в журнале останутся.",
+                        "warn", action=lambda: self.delete(number), action_text="Удалить")
+
+    def delete(self, number):
+        if self._run(lambda: td.remove_ticket(TICKETS_FILE, number), lambda: self.delete(number)):
+            self.app.reload_tickets()
+            self.clear_form()
+            self.app.notify(f"Билет № {number} удалён.", "warn")
 
 def main():
     logging.basicConfig(filename=LOG_FILE, level=logging.INFO, encoding="utf-8",
