@@ -6,7 +6,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Android-7F52FF?logo=kotlin&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-237%20passed-2ea44f)
+![Tests](https://img.shields.io/badge/tests-249%20passed-2ea44f)
 ![Labs](https://img.shields.io/badge/labs-4%2F4-success)
 
 </div>
@@ -14,7 +14,7 @@
 | № | Тема | Где | Стек | Тесты |
 |:-:|---|---|---|:-:|
 | 1 | 🖥️ Консольный генератор экзаменационных билетов | [`lab1/`](lab1/) | Python, openpyxl | 23 ✅ |
-| 2 | 🪟 Генератор билетов с графическим интерфейсом | [`lab2/`](lab2/) | Python, Tkinter, openpyxl, python-docx | 55 ✅ |
+| 2 | 🪟 Генератор билетов с графическим интерфейсом | [`lab2/`](lab2/) | Python, Tkinter, openpyxl, python-docx | 67 ✅ |
 | 3 | 💱 Конвертер валют BNM (Spec-Driven Development) | [currency-converter-sdd](https://github.com/DmitriiAnghis/currency-converter-sdd) | Python, Tkinter, httpx · Spec Kit, Copilot, Antigravity | 126 ✅ |
 | 4 | 📱 Мобильный конвертер валют BNM | [currency-mobile](https://github.com/DmitriiAnghis/currency-mobile) | Kotlin, Jetpack Compose | 33 ✅ |
 
@@ -87,9 +87,9 @@ python make_sample_data.py   # пересоздать тестовые students.
 
 | Вкладка | Что делает |
 |---|---|
-| **Билет** | Выбор группы и студента, «Сгенерировать билет». Номер и три вопроса из `data/tickets.docx` показываются прямо на странице, строка сразу пишется в `data/results.xlsx`. Повторный запрос выдаёт **тот же билет** и пишет «Повтор = да». **Esc** очищает карточку билета. |
-| **Студенты** | Группы и студенты, поиск, **добавление и удаление группы** (удалить можно только пустую), **добавление студента** (с заглавной буквы, без цифр, без повторов), удаление, «Выдать билет» по двойному щелчку. |
-| **Журнал** | Таблица `results.xlsx` с фильтром по группе, сводка: выдано, студентов, повторов, самый частый билет. **Экспорт в CSV** и «Открыть в Excel». |
+| **Билет** | Выбор группы и студента, «Сгенерировать билет». Номер и три вопроса из `data/tickets.docx` показываются прямо на странице, строка сразу пишется в `data/results.xlsx`. Повторный запрос выдаёт **тот же билет** и пишет «Повтор = да». **Переназначить** билет: случайно или на конкретный номер. **Выдать всей группе** сразу. **Esc** очищает карточку билета. |
+| **Студенты** | Группы и студенты, поиск, **добавление, переименование и удаление группы** (удалить можно только пустую), **добавление студента** (с заглавной буквы, без цифр, без повторов) по одному или **списком**, **изменение и перевод в другую группу** (журнал меняется вместе со студентом), удаление, «Выдать билет» по двойному щелчку. |
+| **Журнал** | Таблица `results.xlsx` с фильтром по группе, сводка: выдано, студентов, повторов, переназначено, самый частый билет. **Удалить запись**, **экспорт в CSV**, «Открыть в Excel». Двойной щелчок по строке открывает студента на вкладке «Билет». |
 | **Билеты** | Все билеты из `tickets.docx` с поиском. **Добавить**, **изменить** и **удалить** билет: три вопроса, номер можно не указывать (возьмётся следующий свободный). Изменения сразу сохраняются в `tickets.docx`. |
 
 - Если `results.xlsx`, `students.xlsx` или `tickets.docx` открыт в Excel или Word, программа сама сохраняет и закрывает этот файл и записывает данные. Если не получилось, под шапкой появляется полоса «Файл занят» с кнопкой «Повторить».
@@ -107,6 +107,18 @@ python make_sample_data.py   # пересоздать тестовые students.
 <tr>
 <td><b>Проверка ввода студента и группы</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_errors.png" alt="Ошибки ввода"></td>
 <td><b>Проверка вопросов билета</b><br><img src="screenshots/lab2/redesign/lab2_tab_tickets_error.png" alt="Ошибка в билете"></td>
+</tr>
+<tr>
+<td><b>Переназначение билета</b><br><img src="screenshots/lab2/redesign/lab2_tab_ticket_reassigned.png" alt="Переназначение"></td>
+<td><b>Выдача всей группе</b><br><img src="screenshots/lab2/redesign/lab2_tab_ticket_group.png" alt="Выдать всей группе"></td>
+</tr>
+<tr>
+<td><b>Изменение и перевод студента в другую группу</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_edit.png" alt="Изменить студента"></td>
+<td><b>Добавление студентов списком</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_bulk.png" alt="Добавить списком"></td>
+</tr>
+<tr>
+<td><b>Переименование группы</b><br><img src="screenshots/lab2/redesign/lab2_tab_students_rename.png" alt="Переименовать группу"></td>
+<td><b>Удаление записи журнала</b><br><img src="screenshots/lab2/redesign/lab2_tab_journal_delete.png" alt="Удалить запись"></td>
 </tr>
 </table>
 
