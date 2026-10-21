@@ -6,14 +6,14 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Android-7F52FF?logo=kotlin&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-179%20passed-2ea44f)
+![Tests](https://img.shields.io/badge/tests-194%20passed-2ea44f)
 ![Labs](https://img.shields.io/badge/labs-4%2F4-success)
 
 </div>
 
 | № | Тема | Где | Стек | Тесты |
 |:-:|---|---|---|:-:|
-| 1 | 🖥️ Консольный генератор экзаменационных билетов | [`lab1/`](lab1/) | Python, openpyxl | 8 ✅ |
+| 1 | 🖥️ Консольный генератор экзаменационных билетов | [`lab1/`](lab1/) | Python, openpyxl | 23 ✅ |
 | 2 | 🪟 Генератор билетов с графическим интерфейсом | [`lab2/`](lab2/) | Python, Tkinter, openpyxl, python-docx | 12 ✅ |
 | 3 | 💱 Конвертер валют BNM (Spec-Driven Development) | [currency-converter-sdd](https://github.com/DmitriiAnghis/currency-converter-sdd) | Python, Tkinter, httpx · Spec Kit, Copilot, Antigravity | 126 ✅ |
 | 4 | 📱 Мобильный конвертер валют BNM | [currency-mobile](https://github.com/DmitriiAnghis/currency-mobile) | Kotlin, Jetpack Compose | 33 ✅ |
